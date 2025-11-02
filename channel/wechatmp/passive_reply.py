@@ -210,11 +210,8 @@ def markdown_to_image(markdown_text, output_path=None):
         try:
             with sync_playwright() as p:
                 browser = p.chromium.launch(headless=True)
-                # 使用更高的分辨率和设备像素比
-                page = browser.new_page(
-                    viewport={"width": 1600, "height": 900},
-                    device_scale_factor=2  # 2x 分辨率，提高清晰度
-                )
+                # 使用更高的分辨率（不用 device_scale_factor 避免内存问题）
+                page = browser.new_page(viewport={"width": 1600, "height": 900})
                 page.set_content(html_with_style)
 
                 # 等待内容加载
@@ -224,12 +221,8 @@ def markdown_to_image(markdown_text, output_path=None):
                 content_height = page.evaluate('document.body.scrollHeight')
                 page.set_viewport_size({"width": 1600, "height": int(content_height)})
 
-                # 截图，使用高质量设置
-                page.screenshot(
-                    path=output_path,
-                    full_page=True,
-                    type='png'
-                )
+                # 截图
+                page.screenshot(path=output_path, full_page=True)
                 browser.close()
 
                 logger.info(f"[wechatmp] Markdown converted to image: {output_path}")
