@@ -79,6 +79,19 @@ def call_remote_image_api(image_path, question_content="", subject="数学", gra
                 return str(result)
         else:
             logger.error(f"[wechatmp] Image API error: {response.status_code}, {response.text}")
+
+            # 检查是否是 IP 白名单错误
+            try:
+                error_data = response.json()
+                if error_data.get('errcode') == 40164:
+                    logger.error("[wechatmp] ⚠️ IP 白名单错误！请检查:")
+                    logger.error("[wechatmp]   1. 服务器公网 IP 是否已添加到微信公众平台")
+                    logger.error("[wechatmp]   2. 配置是否已生效（通常需要 5-10 分钟）")
+                    logger.error("[wechatmp]   3. 运行 diagnose_ip_issue.py 脚本进行诊断")
+                    return "图片处理失败: IP 不在微信公众平台白名单中，请联系管理员"
+            except:
+                pass
+
             return f"图片处理失败，服务器返回错误: {response.status_code}"
 
     except Exception as e:
