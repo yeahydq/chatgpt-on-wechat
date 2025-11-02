@@ -324,9 +324,38 @@ def process_image_api_async(channel, from_user, image_path, subject="数学", gr
         if isinstance(api_result, tuple) and len(api_result) == 2:
             # 返回图片 + 文字
             text_content, image_path_result = api_result
-            channel.cache_dict[from_user].append(("image", image_path_result))
-            channel.cache_dict[from_user].append(("text", text_content))
-            logger.info(f"[wechatmp] Async: Cached image + text result for {from_user}")
+
+            # 上传图片到微信服务器并获取 media_id
+            try:
+                if os.path.exists(image_path_result):
+                    logger.info(f"[wechatmp] Uploading markdown image to WeChat: {image_path_result}")
+                    with open(image_path_result, 'rb') as f:
+                        image_type = imghdr.what(image_path_result)
+                        filename = f"markdown-{int(time.time())}.{image_type}"
+                        content_type = f"image/{image_type}"
+                        response = channel.client.material.add("image", (filename, f, content_type))
+                        media_id = response.get("media_id")
+                        logger.info(f"[wechatmp] Markdown image uploaded, media_id: {media_id}")
+
+                    # 删除本地临时文件
+                    try:
+                        os.remove(image_path_result)
+                        logger.info(f"[wechatmp] Deleted temporary markdown image: {image_path_result}")
+                    except Exception as e:
+                        logger.warning(f"[wechatmp] Failed to delete temporary markdown image: {e}")
+
+                    # 缓存 media_id 和文字
+                    channel.cache_dict[from_user].append(("image", media_id))
+                    channel.cache_dict[from_user].append(("text", text_content))
+                    logger.info(f"[wechatmp] Async: Cached image (media_id) + text result for {from_user}")
+                else:
+                    logger.warning(f"[wechatmp] Markdown image file not found: {image_path_result}")
+                    channel.cache_dict[from_user].append(("text", text_content))
+            except Exception as e:
+                logger.error(f"[wechatmp] Failed to upload markdown image: {e}")
+                import traceback
+                logger.error(f"[wechatmp] Traceback: {traceback.format_exc()}")
+                channel.cache_dict[from_user].append(("text", text_content))
         else:
             # 只返回文字
             channel.cache_dict[from_user].append(("text", api_result))
