@@ -129,19 +129,19 @@ def markdown_to_image(markdown_text, output_path=None, max_width=800, line_heigh
 
         # 创建图片
         img = Image.new('RGB', (img_width, img_height), color='white')
-        draw = Image.ImageDraw.Draw(img)
+        draw = ImageDraw.Draw(img)
 
         # 尝试加载字体（如果失败则使用默认字体）
         try:
             # 尝试使用系统字体
-            font = Image.ImageFont.truetype("/System/Library/Fonts/PingFang.ttc", font_size)
+            font = ImageFont.truetype("/System/Library/Fonts/PingFang.ttc", font_size)
         except:
             try:
                 # macOS 备选字体
-                font = Image.ImageFont.truetype("/Library/Fonts/Arial.ttf", font_size)
+                font = ImageFont.truetype("/Library/Fonts/Arial.ttf", font_size)
             except:
                 # 使用默认字体
-                font = Image.ImageFont.load_default()
+                font = ImageFont.load_default()
 
         # 绘制文本
         y = padding
