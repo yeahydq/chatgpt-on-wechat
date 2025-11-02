@@ -295,7 +295,7 @@ def call_remote_image_api(image_path, question_content="帮我解析一下题目
             api_url,
             headers=headers,
             json=payload,
-            timeout=60  # 图片分析可能需要较长时间
+            timeout=120  # 图片分析可能需要较长时间
         )
 
         if response.status_code == 200:
