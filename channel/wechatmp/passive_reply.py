@@ -372,14 +372,6 @@ def call_remote_image_api(image_path, question_content="帮我解析一下题目
     except Exception as e:
         logger.exception(f"[wechatmp] Error calling remote image API: {e}")
         return f"图片处理出错: {str(e)}"
-    finally:
-        # 清理临时文件
-        try:
-            if os.path.exists(image_path):
-                os.remove(image_path)
-                logger.debug(f"[wechatmp] Removed temp image file: {image_path}")
-        except Exception as e:
-            logger.warning(f"[wechatmp] Failed to remove temp file: {e}")
 
 
 # This class is instantiated once per query
@@ -689,12 +681,14 @@ class Query:
                 elif reply_type == "image":
                     # reply_content 可能是 media_id 或本地文件路径
                     media_id = None
+                    local_image_path = None
 
                     logger.info(f"[wechatmp] Processing image reply, reply_content: {reply_content}, exists: {os.path.exists(reply_content)}")
 
                     if os.path.exists(reply_content):
                         # 本地文件路径，需要上传到微信服务器
                         logger.info(f"[wechatmp] Uploading local image to WeChat: {reply_content}")
+                        local_image_path = reply_content  # 保存本地路径，稍后删除
                         try:
                             # 检查文件大小
                             file_size = os.path.getsize(reply_content)
@@ -710,13 +704,6 @@ class Query:
                                 logger.info(f"[wechatmp] upload image response: {response}")
                                 media_id = response.get("media_id")
                                 logger.info(f"[wechatmp] image uploaded, receiver {from_user}, media_id {media_id}")
-
-                                # 删除本地临时文件
-                                try:
-                                    os.remove(reply_content)
-                                    logger.info(f"[wechatmp] Deleted temporary image: {reply_content}")
-                                except Exception as e:
-                                    logger.warning(f"[wechatmp] Failed to delete temporary image: {e}")
                         except Exception as e:
                             logger.error(f"[wechatmp] Failed to upload image: {e}")
                             import traceback
@@ -744,7 +731,17 @@ class Query:
                         )
                         replyPost = ImageReply(message=msg)
                         replyPost.media_id = media_id
-                        return encrypt_func(replyPost.render())
+                        result = encrypt_func(replyPost.render())
+
+                        # 发送成功后，删除本地临时文件
+                        if local_image_path and os.path.exists(local_image_path):
+                            try:
+                                os.remove(local_image_path)
+                                logger.info(f"[wechatmp] Deleted temporary image after sending: {local_image_path}")
+                            except Exception as e:
+                                logger.warning(f"[wechatmp] Failed to delete temporary image: {e}")
+
+                        return result
                     else:
                         logger.error("[wechatmp] Failed to get media_id for image")
                         reply_text = "图片发送失败，请稍后重试"
