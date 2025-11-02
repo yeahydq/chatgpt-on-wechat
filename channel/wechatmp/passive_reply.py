@@ -236,7 +236,7 @@ def markdown_to_image(markdown_text, output_path=None):
         return None
 
 
-def compress_image(image_path, max_size_mb=1, quality=85, max_width=1200, max_height=1200):
+def compress_image(image_path, max_size_mb=2, quality=90, max_width=1600, max_height=1600):
     """
     压缩图片以减小文件大小
     :param image_path: 原始图片路径
@@ -277,7 +277,7 @@ def compress_image(image_path, max_size_mb=1, quality=85, max_width=1200, max_he
         current_quality = quality
         logger.info(f"[wechatmp] Starting compression, target size: {max_size_bytes} bytes, initial quality: {current_quality}%")
 
-        while current_quality > 10:
+        while current_quality > 50:
             buffer = io.BytesIO()
             img.save(buffer, format='JPEG', quality=current_quality, optimize=True)
             compressed_data = buffer.getvalue()
@@ -287,13 +287,13 @@ def compress_image(image_path, max_size_mb=1, quality=85, max_width=1200, max_he
                 logger.info(f"[wechatmp] ✅ Image compressed: {os.path.getsize(image_path)} → {len(compressed_data)} bytes (quality: {current_quality}%)")
                 return compressed_data
 
-            current_quality -= 5
+            current_quality -= 3
 
-        # 如果仍然超过大小，返回最低质量的版本
+        # 如果仍然超过大小，返回质量50的版本
         buffer = io.BytesIO()
-        img.save(buffer, format='JPEG', quality=10, optimize=True)
+        img.save(buffer, format='JPEG', quality=50, optimize=True)
         compressed_data = buffer.getvalue()
-        logger.warning(f"[wechatmp] ⚠️ Image compressed to minimum quality: {len(compressed_data)} bytes")
+        logger.warning(f"[wechatmp] ⚠️ Image compressed to quality 50: {len(compressed_data)} bytes")
         return compressed_data
 
     except Exception as e:
@@ -366,7 +366,7 @@ def call_remote_image_api(image_path, question_content="帮我解析一下题目
 
         # 压缩图片以减小请求体大小
         logger.info("[wechatmp] Compressing image...")
-        compressed_image_data = compress_image(image_path, max_size_mb=1, quality=85)
+        compressed_image_data = compress_image(image_path, max_size_mb=2, quality=90)
         logger.info(f"[wechatmp] Image compressed: {original_size} → {len(compressed_image_data)} bytes")
 
         # 转换为base64
