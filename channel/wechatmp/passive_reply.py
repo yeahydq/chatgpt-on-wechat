@@ -93,7 +93,7 @@ def compress_image(image_path, max_size_mb=1, quality=85, max_width=1200, max_he
             return f.read()
 
 
-def call_remote_image_api(image_path, question_content="", subject="数学", grade="初中"):
+def call_remote_image_api(image_path, question_content="帮我解析一下题目", subject="数学", grade="初中"):
     """
     调用远端API处理图片（类似 /api/analyze-answer 接口）
     :param image_path: 本地图片路径
