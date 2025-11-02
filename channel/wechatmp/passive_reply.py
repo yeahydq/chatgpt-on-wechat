@@ -17,6 +17,7 @@ from channel.wechatmp.common import *
 from channel.wechatmp.wechatmp_channel import WechatMPChannel
 from channel.wechatmp.wechatmp_message import WeChatMPMessage
 from common.log import logger
+from common.utils import split_string_by_utf8_length
 from config import conf, subscribe_msg
 
 try:
@@ -749,7 +750,17 @@ class Query:
                     return "success"
 
                 if reply_type == "text":
-                    reply_text = reply_content
+                    if len(reply_content.encode("utf8")) <= MAX_UTF8_LEN:
+                        reply_text = reply_content
+                    else:
+                        continue_text = "\n【内容过长，回复任意文字以继续】"
+                        splits = split_string_by_utf8_length(
+                            reply_content,
+                            MAX_UTF8_LEN - len(continue_text.encode("utf-8")),
+                            max_split=1,
+                        )
+                        reply_text = splits[0] + continue_text
+                        channel.cache_dict[from_user].append(("text", splits[1]))
 
                     logger.info(
                         "[wechatmp] Request {} do send to {} {}: {}\n{}".format(
