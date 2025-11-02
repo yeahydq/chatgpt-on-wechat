@@ -20,6 +20,18 @@ from common.utils import split_string_by_utf8_length
 from config import conf, subscribe_msg
 
 try:
+    import markdown2
+    HAS_MARKDOWN2 = True
+except ImportError:
+    HAS_MARKDOWN2 = False
+
+try:
+    from weasyprint import HTML, CSS
+    HAS_WEASYPRINT = True
+except ImportError:
+    HAS_WEASYPRINT = False
+
+try:
     from PIL import Image, ImageDraw, ImageFont
     HAS_PIL = True
 except ImportError:
@@ -81,138 +93,119 @@ def extract_and_replace_formulas(text):
     return text, formulas
 
 
-def markdown_to_image(markdown_text, output_path=None, max_width=800, line_height=25, font_size=14):
+def markdown_to_image(markdown_text, output_path=None):
     """
     将 Markdown 文本转换为图片
     :param markdown_text: Markdown 文本内容
     :param output_path: 输出图片路径（如果为None，则保存到临时目录）
-    :param max_width: 图片最大宽度
-    :param line_height: 行高
-    :param font_size: 字体大小
     :return: 图片路径
     """
-    if not HAS_PIL:
-        logger.warning("[wechatmp] PIL not installed, cannot convert markdown to image")
+    if not HAS_WEASYPRINT or not HAS_MARKDOWN2:
+        logger.warning(f"[wechatmp] weasyprint={HAS_WEASYPRINT} or markdown2={HAS_MARKDOWN2} not installed, cannot convert markdown to image")
         return None
 
     try:
         logger.info(f"[wechatmp] Converting markdown to image, text length: {len(markdown_text)}")
 
-        # 规范化换行符：处理 \r\n, \r, \n 等各种格式
+        # 规范化换行符
         text = markdown_text
-        text = text.replace('\r\n', '\n')  # Windows 换行符转换为 Unix
-        text = text.replace('\r', '\n')    # Mac 旧格式换行符转换为 Unix
-        text = text.replace('\\n', '\n')   # 转义的换行符转换为真实换行符
-        text = text.replace('\\r\\n', '\n')  # 转义的 Windows 换行符
-
-        logger.info(f"[wechatmp] Normalized line breaks, text length: {len(text)}")
+        text = text.replace('\r\n', '\n')
+        text = text.replace('\r', '\n')
+        text = text.replace('\\n', '\n')
+        text = text.replace('\\r\\n', '\n')
 
         # 提取公式，用占位符替换
         text, formulas = extract_and_replace_formulas(text)
         if formulas:
             logger.info(f"[wechatmp] Extracted {len(formulas)} formulas, will be shown as placeholders")
 
-        # 简单的文本处理：将 markdown 转换为纯文本
-        # 移除 markdown 特殊符号
-        text = text.replace('# ', '').replace('## ', '').replace('### ', '')
-        text = text.replace('**', '').replace('__', '')
-        text = text.replace('- ', '• ')
-        text = text.replace('> ', '')
+        # 使用 markdown2 将 markdown 转换为 HTML
+        html_content = markdown2.markdown(text, extras=['fenced-code-blocks', 'tables', 'strikethrough'])
 
-        # 分行处理
-        lines = text.split('\n')
+        # 添加 CSS 样式
+        html_with_style = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <style>
+                body {{
+                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+                    font-size: 14px;
+                    line-height: 1.6;
+                    color: #333;
+                    background-color: #fff;
+                    padding: 20px;
+                    margin: 0;
+                }}
+                h1, h2, h3, h4, h5, h6 {{
+                    margin: 10px 0;
+                    font-weight: bold;
+                }}
+                h1 {{ font-size: 24px; }}
+                h2 {{ font-size: 20px; }}
+                h3 {{ font-size: 18px; }}
+                p {{ margin: 8px 0; }}
+                code {{
+                    background-color: #f5f5f5;
+                    padding: 2px 6px;
+                    border-radius: 3px;
+                    font-family: 'Courier New', monospace;
+                }}
+                pre {{
+                    background-color: #f5f5f5;
+                    padding: 10px;
+                    border-radius: 3px;
+                    overflow-x: auto;
+                }}
+                blockquote {{
+                    border-left: 4px solid #ddd;
+                    margin: 10px 0;
+                    padding-left: 10px;
+                    color: #666;
+                }}
+                ul, ol {{
+                    margin: 8px 0;
+                    padding-left: 20px;
+                }}
+                li {{ margin: 4px 0; }}
+                table {{
+                    border-collapse: collapse;
+                    width: 100%;
+                    margin: 10px 0;
+                }}
+                th, td {{
+                    border: 1px solid #ddd;
+                    padding: 8px;
+                    text-align: left;
+                }}
+                th {{ background-color: #f5f5f5; }}
+            </style>
+        </head>
+        <body>
+            {html_content}
+        </body>
+        </html>
+        """
 
-        # 调试：输出前几行文本
-        logger.info(f"[wechatmp] Total lines: {len(lines)}")
-        for i, line in enumerate(lines[:5]):
-            logger.info(f"[wechatmp] Line {i}: {repr(line)}")
+        logger.info(f"[wechatmp] Converted markdown to HTML, length: {len(html_with_style)}")
 
-        # 计算图片高度
-        padding = 20
-        img_height = len(lines) * line_height + padding * 2
-        img_width = max_width
-
-        # 创建图片
-        img = Image.new('RGB', (img_width, img_height), color='white')
-        draw = ImageDraw.Draw(img)
-
-        # 尝试加载字体（如果失败则使用默认字体）
-        font = None
-        font_paths = [
-            # macOS 通用字体
-            "/System/Library/Fonts/Helvetica.ttc",
-            "/System/Library/Fonts/Arial.ttf",
-            "/Library/Fonts/Arial.ttf",
-            # Linux 通用字体
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-            "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
-            # Windows 通用字体
-            "C:\\Windows\\Fonts\\arial.ttf",
-            "C:\\Windows\\Fonts\\segoeui.ttf",
-        ]
-
-        for font_path in font_paths:
-            try:
-                if os.path.exists(font_path):
-                    font = ImageFont.truetype(font_path, font_size)
-                    logger.info(f"[wechatmp] Loaded font from: {font_path}")
-                    break
-            except Exception as e:
-                logger.debug(f"[wechatmp] Failed to load font from {font_path}: {e}")
-                continue
-
-        if font is None:
-            # 使用默认字体
-            logger.warning("[wechatmp] No suitable font found, using default font")
-            try:
-                # 尝试使用 PIL 的默认字体（支持更多字符）
-                font = ImageFont.load_default(size=font_size)
-            except:
-                # 旧版本 PIL 的默认字体
-                font = ImageFont.load_default()
-
-        # 绘制文本
-        y = padding
-        drawn_lines = 0
-        for line_idx, line in enumerate(lines):
-            # 清理行尾空格和特殊字符
-            line = line.rstrip()
-
-            if line.strip():  # 只绘制非空行
-                try:
-                    # 确保文本是字符串类型
-                    if not isinstance(line, str):
-                        line = str(line)
-
-                    draw.text((padding, y), line, fill='black', font=font)
-                    drawn_lines += 1
-                    logger.debug(f"[wechatmp] Drew line {line_idx}: {repr(line[:50])}")
-                except Exception as e:
-                    logger.warning(f"[wechatmp] Failed to draw line {line_idx}: {e}, text: {repr(line[:50])}")
-                y += line_height
-            else:
-                y += line_height // 2  # 空行占用一半高度
-
-        logger.info(f"[wechatmp] Successfully drew {drawn_lines} lines")
-
-        # 调整图片高度以适应实际内容
-        img = img.crop((0, 0, img_width, y + padding))
-
-        # 保存图片
+        # 生成输出路径
         if output_path is None:
             output_path = f"tmp/markdown_{int(time.time())}.png"
 
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        img.save(output_path, 'PNG')
-        logger.info(f"[wechatmp] Markdown converted to image: {output_path}")
 
+        # 使用 weasyprint 将 HTML 转换为图片
+        logger.info(f"[wechatmp] Converting HTML to image: {output_path}")
+        from weasyprint import HTML
+        HTML(string=html_with_style).write_png(output_path)
+
+        logger.info(f"[wechatmp] Markdown converted to image: {output_path}")
         return output_path
 
     except Exception as e:
-        logger.error(f"[wechatmp] Failed to convert markdown to image: {e}")
-        import traceback
-        logger.error(f"[wechatmp] Traceback: {traceback.format_exc()}")
+        logger.exception(f"[wechatmp] Error converting markdown to image: {e}")
         return None
 
 
