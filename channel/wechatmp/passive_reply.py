@@ -128,58 +128,66 @@ def markdown_to_image(markdown_text, output_path=None):
         <html>
         <head>
             <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <style>
                 body {{
                     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
-                    font-size: 14px;
-                    line-height: 1.6;
+                    font-size: 16px;
+                    line-height: 1.8;
                     color: #333;
                     background-color: #fff;
-                    padding: 20px;
+                    padding: 30px;
                     margin: 0;
+                    -webkit-font-smoothing: antialiased;
+                    -moz-osx-font-smoothing: grayscale;
                 }}
                 h1, h2, h3, h4, h5, h6 {{
-                    margin: 10px 0;
+                    margin: 15px 0 10px 0;
                     font-weight: bold;
                 }}
-                h1 {{ font-size: 24px; }}
-                h2 {{ font-size: 20px; }}
-                h3 {{ font-size: 18px; }}
-                p {{ margin: 8px 0; }}
+                h1 {{ font-size: 28px; }}
+                h2 {{ font-size: 24px; }}
+                h3 {{ font-size: 20px; }}
+                h4 {{ font-size: 18px; }}
+                p {{ margin: 10px 0; }}
                 code {{
                     background-color: #f5f5f5;
-                    padding: 2px 6px;
-                    border-radius: 3px;
+                    padding: 3px 8px;
+                    border-radius: 4px;
                     font-family: 'Courier New', monospace;
+                    font-size: 15px;
                 }}
                 pre {{
                     background-color: #f5f5f5;
-                    padding: 10px;
-                    border-radius: 3px;
+                    padding: 15px;
+                    border-radius: 4px;
                     overflow-x: auto;
+                    font-size: 14px;
+                    line-height: 1.5;
                 }}
                 blockquote {{
                     border-left: 4px solid #ddd;
-                    margin: 10px 0;
-                    padding-left: 10px;
+                    margin: 15px 0;
+                    padding-left: 15px;
                     color: #666;
                 }}
                 ul, ol {{
-                    margin: 8px 0;
-                    padding-left: 20px;
+                    margin: 10px 0;
+                    padding-left: 30px;
                 }}
-                li {{ margin: 4px 0; }}
+                li {{ margin: 6px 0; }}
                 table {{
                     border-collapse: collapse;
                     width: 100%;
-                    margin: 10px 0;
+                    margin: 15px 0;
+                    font-size: 15px;
                 }}
                 th, td {{
                     border: 1px solid #ddd;
-                    padding: 8px;
+                    padding: 10px;
                     text-align: left;
                 }}
-                th {{ background-color: #f5f5f5; }}
+                th {{ background-color: #f5f5f5; font-weight: bold; }}
             </style>
         </head>
         <body>
@@ -202,7 +210,11 @@ def markdown_to_image(markdown_text, output_path=None):
         try:
             with sync_playwright() as p:
                 browser = p.chromium.launch(headless=True)
-                page = browser.new_page(viewport={"width": 1200, "height": 800})
+                # 使用更高的分辨率和设备像素比
+                page = browser.new_page(
+                    viewport={"width": 1600, "height": 900},
+                    device_scale_factor=2  # 2x 分辨率，提高清晰度
+                )
                 page.set_content(html_with_style)
 
                 # 等待内容加载
@@ -210,10 +222,14 @@ def markdown_to_image(markdown_text, output_path=None):
 
                 # 获取实际内容高度
                 content_height = page.evaluate('document.body.scrollHeight')
-                page.set_viewport_size({"width": 1200, "height": int(content_height)})
+                page.set_viewport_size({"width": 1600, "height": int(content_height)})
 
-                # 截图
-                page.screenshot(path=output_path, full_page=True)
+                # 截图，使用高质量设置
+                page.screenshot(
+                    path=output_path,
+                    full_page=True,
+                    type='png'
+                )
                 browser.close()
 
                 logger.info(f"[wechatmp] Markdown converted to image: {output_path}")
