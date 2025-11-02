@@ -636,10 +636,13 @@ class Query:
 
                 # Only one request can access to the cached data
                 try:
+                    logger.info(f"[wechatmp] Cache dict for {from_user}: {channel.cache_dict.get(from_user, [])}")
                     (reply_type, reply_content) = channel.cache_dict[from_user].pop(0)
+                    logger.info(f"[wechatmp] Popped from cache: type={reply_type}, content_preview={str(reply_content)[:100]}")
                     if not channel.cache_dict[from_user]:  # If popping the message makes the list empty, delete the user entry from cache
                         del channel.cache_dict[from_user]
                 except IndexError:
+                    logger.warning(f"[wechatmp] Cache is empty for {from_user}")
                     return "success"
 
                 if reply_type == "text":
