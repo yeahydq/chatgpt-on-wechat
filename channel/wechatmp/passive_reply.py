@@ -3,6 +3,7 @@ import time
 import requests
 import os
 import base64
+import io
 
 import web
 from wechatpy import parse_message
@@ -16,6 +17,80 @@ from channel.wechatmp.wechatmp_message import WeChatMPMessage
 from common.log import logger
 from common.utils import split_string_by_utf8_length
 from config import conf, subscribe_msg
+
+try:
+    from PIL import Image
+    HAS_PIL = True
+except ImportError:
+    HAS_PIL = False
+
+
+def compress_image(image_path, max_size_mb=1, quality=85, max_width=1200, max_height=1200):
+    """
+    压缩图片以减小文件大小
+    :param image_path: 原始图片路径
+    :param max_size_mb: 目标最大大小（MB）
+    :param quality: JPEG 质量（1-100）
+    :param max_width: 最大宽度
+    :param max_height: 最大高度
+    :return: 压缩后的图片数据（字节）
+    """
+    logger.info(f"[wechatmp] compress_image called with path: {image_path}")
+    logger.info(f"[wechatmp] HAS_PIL: {HAS_PIL}")
+
+    if not HAS_PIL:
+        logger.warning("[wechatmp] PIL not installed, using original image")
+        with open(image_path, 'rb') as f:
+            return f.read()
+
+    try:
+        logger.info(f"[wechatmp] Opening image: {image_path}")
+        # 打开图片
+        img = Image.open(image_path)
+        logger.info(f"[wechatmp] Image opened, mode: {img.mode}, size: {img.size}")
+
+        # 转换为 RGB（处理 RGBA 等格式）
+        if img.mode in ('RGBA', 'LA', 'P'):
+            logger.info(f"[wechatmp] Converting image from {img.mode} to RGB")
+            rgb_img = Image.new('RGB', img.size, (255, 255, 255))
+            rgb_img.paste(img, mask=img.split()[-1] if img.mode == 'RGBA' else None)
+            img = rgb_img
+
+        # 缩小尺寸
+        logger.info(f"[wechatmp] Resizing image to max {max_width}x{max_height}")
+        img.thumbnail((max_width, max_height), Image.Resampling.LANCZOS)
+        logger.info(f"[wechatmp] Image resized to: {img.size}")
+
+        # 压缩到目标大小
+        max_size_bytes = max_size_mb * 1024 * 1024
+        current_quality = quality
+        logger.info(f"[wechatmp] Starting compression, target size: {max_size_bytes} bytes, initial quality: {current_quality}%")
+
+        while current_quality > 10:
+            buffer = io.BytesIO()
+            img.save(buffer, format='JPEG', quality=current_quality, optimize=True)
+            compressed_data = buffer.getvalue()
+            logger.info(f"[wechatmp] Quality {current_quality}%: {len(compressed_data)} bytes")
+
+            if len(compressed_data) <= max_size_bytes:
+                logger.info(f"[wechatmp] ✅ Image compressed: {os.path.getsize(image_path)} → {len(compressed_data)} bytes (quality: {current_quality}%)")
+                return compressed_data
+
+            current_quality -= 5
+
+        # 如果仍然超过大小，返回最低质量的版本
+        buffer = io.BytesIO()
+        img.save(buffer, format='JPEG', quality=10, optimize=True)
+        compressed_data = buffer.getvalue()
+        logger.warning(f"[wechatmp] ⚠️ Image compressed to minimum quality: {len(compressed_data)} bytes")
+        return compressed_data
+
+    except Exception as e:
+        logger.error(f"[wechatmp] ❌ Failed to compress image: {e}, using original")
+        import traceback
+        logger.error(f"[wechatmp] Traceback: {traceback.format_exc()}")
+        with open(image_path, 'rb') as f:
+            return f.read()
 
 
 def call_remote_image_api(image_path, question_content="", subject="数学", grade="初中"):
@@ -38,11 +113,16 @@ def call_remote_image_api(image_path, question_content="", subject="数学", gra
         logger.info(f"[wechatmp] Calling remote image API: {api_url} with image: {image_path}")
         logger.info(f"[wechatmp] Image path type: {type(image_path)}")
         logger.info(f"[wechatmp] Image file exists: {os.path.exists(image_path)}")
-        logger.info(f"[wechatmp] Image file size: {os.path.getsize(image_path) if os.path.exists(image_path) else 'N/A'} bytes")
+        original_size = os.path.getsize(image_path) if os.path.exists(image_path) else 'N/A'
+        logger.info(f"[wechatmp] Image file size: {original_size} bytes")
 
-        # 读取图片文件并转换为base64
-        with open(image_path, 'rb') as f:
-            image_data = base64.b64encode(f.read()).decode('utf-8')
+        # 压缩图片以减小请求体大小
+        logger.info("[wechatmp] Compressing image...")
+        compressed_image_data = compress_image(image_path, max_size_mb=1, quality=85)
+        logger.info(f"[wechatmp] Image compressed: {original_size} → {len(compressed_image_data)} bytes")
+
+        # 转换为base64
+        image_data = base64.b64encode(compressed_image_data).decode('utf-8')
 
         # 构建请求数据
         payload = {
@@ -82,6 +162,16 @@ def call_remote_image_api(image_path, question_content="", subject="数学", gra
                 return str(result)
         else:
             logger.error(f"[wechatmp] Image API error: {response.status_code}, {response.text}")
+
+            # 检查是否是请求体过大错误
+            if response.status_code == 413:
+                logger.error("[wechatmp] ⚠️ 请求体过大错误（413）！")
+                logger.error("[wechatmp] 解决方案:")
+                logger.error("[wechatmp]   1. 图片已自动压缩，但仍然超过限制")
+                logger.error("[wechatmp]   2. 请检查 API 服务器的请求体大小限制")
+                logger.error("[wechatmp]   3. 如果使用 nginx，增加 client_max_body_size 配置")
+                logger.error("[wechatmp]   4. 或者在 API 服务器端增加请求体大小限制")
+                return "图片处理失败: 请求体过大，请联系管理员增加服务器限制"
 
             # 检查是否是 IP 白名单错误
             try:
@@ -202,9 +292,11 @@ class Query:
 
                                     logger.info(f"[wechatmp] After prepare() - content type: {type(content)}, content: {content}")
                                     logger.info(f"[wechatmp] After prepare() - wechatmp_msg.content: {wechatmp_msg.content}")
-                                    logger.info(f"[wechatmp] Image file exists: {os.path.exists(content)}")
+                                    logger.info(f"[wechatmp] Image file exists: {os.path.exists(wechatmp_msg.content)}")
 
-                                    image_path = content  # content是图片的本地路径
+                                    # ⚠️ 重要：使用 wechatmp_msg.content 而不是 content 变量
+                                    # 因为 content 是在 prepare() 之前赋值的，不会被更新
+                                    image_path = wechatmp_msg.content  # 使用 wechatmp_msg.content
 
                                     # 调用远端API处理图片
                                     subject = conf().get("image_api_subject", "数学")
@@ -240,9 +332,11 @@ class Query:
 
                             logger.info(f"[wechatmp] After prepare() - content type: {type(content)}, content: {content}")
                             logger.info(f"[wechatmp] After prepare() - wechatmp_msg.content: {wechatmp_msg.content}")
-                            logger.info(f"[wechatmp] Image file exists: {os.path.exists(content)}")
+                            logger.info(f"[wechatmp] Image file exists: {os.path.exists(wechatmp_msg.content)}")
 
-                            image_path = content  # content是图片的本地路径
+                            # ⚠️ 重要：使用 wechatmp_msg.content 而不是 content 变量
+                            # 因为 content 是在 prepare() 之前赋值的，不会被更新
+                            image_path = wechatmp_msg.content  # 使用 wechatmp_msg.content
 
                             # 调用远端API处理图片
                             subject = conf().get("image_api_subject", "数学")
