@@ -26,10 +26,10 @@ except ImportError:
     HAS_MARKDOWN2 = False
 
 try:
-    from weasyprint import HTML, CSS
-    HAS_WEASYPRINT = True
+    from html2image import HtmlImageConverter
+    HAS_HTML2IMAGE = True
 except ImportError:
-    HAS_WEASYPRINT = False
+    HAS_HTML2IMAGE = False
 
 try:
     from PIL import Image, ImageDraw, ImageFont
@@ -100,8 +100,8 @@ def markdown_to_image(markdown_text, output_path=None):
     :param output_path: 输出图片路径（如果为None，则保存到临时目录）
     :return: 图片路径
     """
-    if not HAS_WEASYPRINT or not HAS_MARKDOWN2:
-        logger.warning(f"[wechatmp] weasyprint={HAS_WEASYPRINT} or markdown2={HAS_MARKDOWN2} not installed, cannot convert markdown to image")
+    if not HAS_HTML2IMAGE or not HAS_MARKDOWN2:
+        logger.warning(f"[wechatmp] html2image={HAS_HTML2IMAGE} or markdown2={HAS_MARKDOWN2} not installed, cannot convert markdown to image")
         return None
 
     try:
@@ -196,10 +196,10 @@ def markdown_to_image(markdown_text, output_path=None):
 
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
-        # 使用 weasyprint 将 HTML 转换为图片
+        # 使用 html2image 将 HTML 转换为图片
         logger.info(f"[wechatmp] Converting HTML to image: {output_path}")
-        from weasyprint import HTML
-        HTML(string=html_with_style).write_png(output_path)
+        hti = HtmlImageConverter(custom_objects={'base_path': os.getcwd()})
+        hti.convert_single(html_string=html_with_style, output_file=output_path)
 
         logger.info(f"[wechatmp] Markdown converted to image: {output_path}")
         return output_path
