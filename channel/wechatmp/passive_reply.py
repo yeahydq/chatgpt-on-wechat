@@ -5,6 +5,7 @@ import os
 import base64
 import io
 import imghdr
+import threading
 
 import web
 from wechatpy import parse_message
@@ -295,6 +296,43 @@ def compress_image(image_path, max_size_mb=1, quality=85, max_width=1200, max_he
             return f.read()
 
 
+def process_image_api_async(channel, from_user, image_path, subject="数学", grade="初中"):
+    """
+    在后台线程中异步处理图片API调用
+    :param channel: WeChat 频道对象
+    :param from_user: 用户ID
+    :param image_path: 图片路径
+    :param subject: 科目
+    :param grade: 年级
+    """
+    try:
+        logger.info(f"[wechatmp] Starting async image processing for {from_user}")
+
+        # 调用API
+        api_result = call_remote_image_api(image_path, subject=subject, grade=grade)
+
+        # 缓存结果
+        if isinstance(api_result, tuple) and len(api_result) == 2:
+            # 返回图片 + 文字
+            text_content, image_path_result = api_result
+            channel.cache_dict[from_user].append(("image", image_path_result))
+            channel.cache_dict[from_user].append(("text", text_content))
+            logger.info(f"[wechatmp] Async: Cached image + text result for {from_user}")
+        else:
+            # 只返回文字
+            channel.cache_dict[from_user].append(("text", api_result))
+            logger.info(f"[wechatmp] Async: Cached text result for {from_user}")
+
+        logger.info(f"[wechatmp] Async image processing completed for {from_user}")
+    except Exception as e:
+        logger.error(f"[wechatmp] Error in async image processing for {from_user}: {e}")
+        channel.cache_dict[from_user].append(("text", f"图片处理出错: {str(e)}"))
+    finally:
+        # 移除运行状态
+        if from_user in channel.running:
+            channel.running.remove(from_user)
+
+
 def call_remote_image_api(image_path, question_content="帮我解析一下题目", subject="数学", grade="初中"):
     """
     调用远端API处理图片（类似 /api/analyze-answer 接口）
@@ -531,31 +569,22 @@ class Query:
                                     # 因为 content 是在 prepare() 之前赋值的，不会被更新
                                     image_path = wechatmp_msg.content  # 使用 wechatmp_msg.content
 
-                                    # 调用远端API处理图片
+                                    # 在后台线程中异步处理图片API调用（避免超时）
                                     subject = conf().get("image_api_subject", "数学")
                                     grade = conf().get("image_api_grade", "初中")
-                                    api_result = call_remote_image_api(image_path, subject=subject, grade=grade)
 
-                                    channel.running.remove(from_user)
+                                    # 启动后台线程处理
+                                    thread = threading.Thread(
+                                        target=process_image_api_async,
+                                        args=(channel, from_user, image_path, subject, grade),
+                                        daemon=True
+                                    )
+                                    thread.start()
 
                                     # 清除用户状态
                                     channel.user_session_state.pop(from_user, None)
 
-                                    # 缓存结果，等待用户查询
-                                    # api_result 可能是字符串或 (text, image_path) 元组
-                                    if isinstance(api_result, tuple) and len(api_result) == 2:
-                                        # 返回图片 + 文字
-                                        text_content, image_path = api_result
-                                        # 缓存图片路径和完整的文字内容
-                                        channel.cache_dict[from_user].append(("image", image_path))
-                                        channel.cache_dict[from_user].append(("text", text_content))
-                                        logger.info(f"[wechatmp] Cached image + text result for {from_user}")
-                                    else:
-                                        # 只返回文字
-                                        channel.cache_dict[from_user].append(("text", api_result))
-                                        logger.info(f"[wechatmp] Cached text result for {from_user}")
-
-                                    # 返回"正在分析中"提示
+                                    # 立即返回"正在分析中"提示（不等待API返回）
                                     reply_text = "✅ 已收到图片，正在分析中...请稍候"
                                     replyPost = create_reply(reply_text, msg)
                                     return encrypt_func(replyPost.render())
@@ -585,31 +614,22 @@ class Query:
                             # 因为 content 是在 prepare() 之前赋值的，不会被更新
                             image_path = wechatmp_msg.content  # 使用 wechatmp_msg.content
 
-                            # 调用远端API处理图片
+                            # 在后台线程中异步处理图片API调用（避免超时）
                             subject = conf().get("image_api_subject", "数学")
                             grade = conf().get("image_api_grade", "初中")
-                            api_result = call_remote_image_api(image_path, subject=subject, grade=grade)
 
-                            channel.running.remove(from_user)
+                            # 启动后台线程处理
+                            thread = threading.Thread(
+                                target=process_image_api_async,
+                                args=(channel, from_user, image_path, subject, grade),
+                                daemon=True
+                            )
+                            thread.start()
 
                             # 清除用户状态（如果有的话）
                             channel.user_session_state.pop(from_user, None)
 
-                            # 缓存结果，等待用户查询
-                            # api_result 可能是字符串或 (text, image_path) 元组
-                            if isinstance(api_result, tuple) and len(api_result) == 2:
-                                # 返回图片 + 文字
-                                text_content, image_path = api_result
-                                # 缓存图片路径和完整的文字内容
-                                channel.cache_dict[from_user].append(("image", image_path))
-                                channel.cache_dict[from_user].append(("text", text_content))
-                                logger.info(f"[wechatmp] Cached image + text result for {from_user}")
-                            else:
-                                # 只返回文字
-                                channel.cache_dict[from_user].append(("text", api_result))
-                                logger.info(f"[wechatmp] Cached text result for {from_user}")
-
-                            # 返回"正在分析中"提示
+                            # 立即返回"正在分析中"提示（不等待API返回）
                             reply_text = "✅ 已收到图片，正在分析中...请稍候"
                             replyPost = create_reply(reply_text, msg)
                             return encrypt_func(replyPost.render())
