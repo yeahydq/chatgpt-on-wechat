@@ -4,6 +4,7 @@ import requests
 import os
 import base64
 import io
+import imghdr
 
 import web
 from wechatpy import parse_message
@@ -19,10 +20,162 @@ from common.utils import split_string_by_utf8_length
 from config import conf, subscribe_msg
 
 try:
-    from PIL import Image
+    from PIL import Image, ImageDraw, ImageFont
     HAS_PIL = True
 except ImportError:
     HAS_PIL = False
+
+try:
+    import markdown
+    HAS_MARKDOWN = True
+except ImportError:
+    HAS_MARKDOWN = False
+
+try:
+    from PIL import ImageFont
+    import subprocess
+    HAS_LATEX = True
+except ImportError:
+    HAS_LATEX = False
+
+
+def extract_and_replace_formulas(text):
+    """
+    提取文本中的公式（LaTeX 格式），并用占位符替换
+    :param text: 包含公式的文本
+    :return: (处理后的文本, 公式字典)
+    """
+    import re
+
+    formulas = {}
+    formula_count = 0
+
+    # 处理行内公式 $...$
+    def replace_inline_formula(match):
+        nonlocal formula_count
+        formula = match.group(1)
+        placeholder = f"[FORMULA_{formula_count}]"
+        formulas[placeholder] = formula
+        formula_count += 1
+        logger.info(f"[wechatmp] Found inline formula: {formula}")
+        return placeholder
+
+    # 处理块级公式 $$...$$
+    def replace_block_formula(match):
+        nonlocal formula_count
+        formula = match.group(1)
+        placeholder = f"[FORMULA_{formula_count}]"
+        formulas[placeholder] = formula
+        formula_count += 1
+        logger.info(f"[wechatmp] Found block formula: {formula}")
+        return placeholder
+
+    # 替换块级公式（必须在行内公式之前）
+    text = re.sub(r'\$\$(.*?)\$\$', replace_block_formula, text, flags=re.DOTALL)
+
+    # 替换行内公式
+    text = re.sub(r'\$(.*?)\$', replace_inline_formula, text)
+
+    logger.info(f"[wechatmp] Extracted {len(formulas)} formulas")
+
+    return text, formulas
+
+
+def markdown_to_image(markdown_text, output_path=None, max_width=800, line_height=25, font_size=14):
+    """
+    将 Markdown 文本转换为图片
+    :param markdown_text: Markdown 文本内容
+    :param output_path: 输出图片路径（如果为None，则保存到临时目录）
+    :param max_width: 图片最大宽度
+    :param line_height: 行高
+    :param font_size: 字体大小
+    :return: 图片路径
+    """
+    if not HAS_PIL:
+        logger.warning("[wechatmp] PIL not installed, cannot convert markdown to image")
+        return None
+
+    try:
+        logger.info(f"[wechatmp] Converting markdown to image, text length: {len(markdown_text)}")
+
+        # 规范化换行符：处理 \r\n, \r, \n 等各种格式
+        text = markdown_text
+        text = text.replace('\r\n', '\n')  # Windows 换行符转换为 Unix
+        text = text.replace('\r', '\n')    # Mac 旧格式换行符转换为 Unix
+        text = text.replace('\\n', '\n')   # 转义的换行符转换为真实换行符
+        text = text.replace('\\r\\n', '\n')  # 转义的 Windows 换行符
+
+        logger.info(f"[wechatmp] Normalized line breaks, text length: {len(text)}")
+
+        # 提取公式，用占位符替换
+        text, formulas = extract_and_replace_formulas(text)
+        if formulas:
+            logger.info(f"[wechatmp] Extracted {len(formulas)} formulas, will be shown as placeholders")
+
+        # 简单的文本处理：将 markdown 转换为纯文本
+        # 移除 markdown 特殊符号
+        text = text.replace('# ', '').replace('## ', '').replace('### ', '')
+        text = text.replace('**', '').replace('__', '')
+        text = text.replace('- ', '• ')
+        text = text.replace('> ', '')
+
+        # 分行处理
+        lines = text.split('\n')
+
+        # 计算图片高度
+        padding = 20
+        img_height = len(lines) * line_height + padding * 2
+        img_width = max_width
+
+        # 创建图片
+        img = Image.new('RGB', (img_width, img_height), color='white')
+        draw = Image.ImageDraw.Draw(img)
+
+        # 尝试加载字体（如果失败则使用默认字体）
+        try:
+            # 尝试使用系统字体
+            font = Image.ImageFont.truetype("/System/Library/Fonts/PingFang.ttc", font_size)
+        except:
+            try:
+                # macOS 备选字体
+                font = Image.ImageFont.truetype("/Library/Fonts/Arial.ttf", font_size)
+            except:
+                # 使用默认字体
+                font = Image.ImageFont.load_default()
+
+        # 绘制文本
+        y = padding
+        for line in lines:
+            # 清理行尾空格和特殊字符
+            line = line.rstrip()
+
+            if line.strip():  # 只绘制非空行
+                try:
+                    draw.text((padding, y), line, fill='black', font=font)
+                except Exception as e:
+                    logger.warning(f"[wechatmp] Failed to draw text: {e}, skipping line")
+                y += line_height
+            else:
+                y += line_height // 2  # 空行占用一半高度
+
+        # 调整图片高度以适应实际内容
+        img = img.crop((0, 0, img_width, y + padding))
+
+        # 保存图片
+        if output_path is None:
+            output_path = f"tmp/markdown_{int(time.time())}.png"
+
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        img.save(output_path, 'PNG')
+        logger.info(f"[wechatmp] Markdown converted to image: {output_path}")
+
+        return output_path
+
+    except Exception as e:
+        logger.error(f"[wechatmp] Failed to convert markdown to image: {e}")
+        import traceback
+        logger.error(f"[wechatmp] Traceback: {traceback.format_exc()}")
+        return None
 
 
 def compress_image(image_path, max_size_mb=1, quality=85, max_width=1200, max_height=1200):
@@ -154,7 +307,36 @@ def call_remote_image_api(image_path, question_content="帮我解析一下题目
             # 假设返回格式为 {"result": "分析结果", "success": true}
             if isinstance(result, dict):
                 if result.get('success') or result.get('result'):
-                    return result.get('result', result.get('answer', str(result)))
+                    # 提取分析结果
+                    analysis_text = None
+
+                    # 尝试从不同的字段中提取分析结果
+                    if result.get('data') and isinstance(result['data'], dict):
+                        analysis_text = result['data'].get('analysis', result.get('result', result.get('answer')))
+                    else:
+                        analysis_text = result.get('result', result.get('answer', str(result)))
+
+                    if not analysis_text:
+                        analysis_text = str(result)
+
+                    # 检查是否启用了 markdown 转图片功能
+                    enable_markdown_image = conf().get("enable_markdown_image", False)
+
+                    if enable_markdown_image and HAS_PIL:
+                        logger.info("[wechatmp] Converting analysis result to image...")
+                        # 将分析结果转换为图片
+                        image_path = markdown_to_image(analysis_text)
+
+                        if image_path and os.path.exists(image_path):
+                            # 返回一个包含文字和图片的结构
+                            # 格式：(text_content, image_path)
+                            logger.info(f"[wechatmp] Analysis converted to image: {image_path}")
+                            return (analysis_text[:200] + "...\n\n[详细分析已转换为图片]", image_path)
+                        else:
+                            logger.warning("[wechatmp] Failed to convert to image, returning text only")
+                            return analysis_text
+                    else:
+                        return analysis_text
                 else:
                     error_msg = result.get('error', result.get('message', '未知错误'))
                     return f"图片分析失败: {error_msg}"
@@ -304,7 +486,18 @@ class Query:
                                     api_result = call_remote_image_api(image_path, subject=subject, grade=grade)
 
                                     # 将结果缓存，准备返回给用户
-                                    channel.cache_dict[from_user].append(("text", api_result))
+                                    # api_result 可能是字符串或 (text, image_path) 元组
+                                    if isinstance(api_result, tuple) and len(api_result) == 2:
+                                        # 返回文字 + 图片
+                                        text_content, image_path = api_result
+                                        channel.cache_dict[from_user].append(("text", text_content))
+                                        channel.cache_dict[from_user].append(("image", image_path))
+                                        logger.info(f"[wechatmp] Cached text + image result for {from_user}")
+                                    else:
+                                        # 只返回文字
+                                        channel.cache_dict[from_user].append(("text", api_result))
+                                        logger.info(f"[wechatmp] Cached text result for {from_user}")
+
                                     channel.running.remove(from_user)
 
                                     # 清除用户状态
@@ -344,7 +537,18 @@ class Query:
                             api_result = call_remote_image_api(image_path, subject=subject, grade=grade)
 
                             # 将结果缓存，准备返回给用户
-                            channel.cache_dict[from_user].append(("text", api_result))
+                            # api_result 可能是字符串或 (text, image_path) 元组
+                            if isinstance(api_result, tuple) and len(api_result) == 2:
+                                # 返回文字 + 图片
+                                text_content, image_path = api_result
+                                channel.cache_dict[from_user].append(("text", text_content))
+                                channel.cache_dict[from_user].append(("image", image_path))
+                                logger.info(f"[wechatmp] Cached text + image result for {from_user}")
+                            else:
+                                # 只返回文字
+                                channel.cache_dict[from_user].append(("text", api_result))
+                                logger.info(f"[wechatmp] Cached text result for {from_user}")
+
                             channel.running.remove(from_user)
 
                             # 清除用户状态（如果有的话）
@@ -480,8 +684,37 @@ class Query:
                     return encrypt_func(replyPost.render())
 
                 elif reply_type == "image":
-                    media_id = reply_content
-                    asyncio.run_coroutine_threadsafe(channel.delete_media(media_id), channel.delete_media_loop)
+                    # reply_content 可能是 media_id 或本地文件路径
+                    if os.path.exists(reply_content):
+                        # 本地文件路径，需要上传到微信服务器
+                        logger.info(f"[wechatmp] Uploading local image to WeChat: {reply_content}")
+                        try:
+                            with open(reply_content, 'rb') as f:
+                                image_type = imghdr.what(reply_content)
+                                filename = f"image-{message_id}.{image_type}"
+                                content_type = f"image/{image_type}"
+                                response = channel.client.material.add("image", (filename, f, content_type))
+                                logger.debug(f"[wechatmp] upload image response: {response}")
+                                media_id = response["media_id"]
+                                logger.info(f"[wechatmp] image uploaded, receiver {from_user}, media_id {media_id}")
+
+                                # 删除本地临时文件
+                                try:
+                                    os.remove(reply_content)
+                                    logger.info(f"[wechatmp] Deleted temporary image: {reply_content}")
+                                except Exception as e:
+                                    logger.warning(f"[wechatmp] Failed to delete temporary image: {e}")
+                        except Exception as e:
+                            logger.error(f"[wechatmp] Failed to upload image: {e}")
+                            # 上传失败，返回错误信息
+                            reply_text = "图片上传失败，请稍后重试"
+                            replyPost = create_reply(reply_text, msg)
+                            return encrypt_func(replyPost.render())
+                    else:
+                        # media_id
+                        media_id = reply_content
+                        asyncio.run_coroutine_threadsafe(channel.delete_media(media_id), channel.delete_media_loop)
+
                     logger.info(
                         "[wechatmp] Request {} do send to {} {}: {} image media_id {}".format(
                             request_cnt,
