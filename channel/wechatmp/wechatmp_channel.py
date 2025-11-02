@@ -52,6 +52,8 @@ class WechatMPChannel(ChatChannel):
             self.running = set()
             # Count the request from wechat official server by message_id
             self.request_cnt = dict()
+            # 用户会话状态管理（用于图片API等需要多步交互的场景）
+            self.user_session_state = dict()  # {user_id: {"state": "waiting_image", "data": {...}}}
             # The permanent media need to be deleted to avoid media number limit
             self.delete_media_loop = asyncio.new_event_loop()
             t = threading.Thread(target=self.start_loop, args=(self.delete_media_loop,))

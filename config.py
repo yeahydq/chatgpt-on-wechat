@@ -134,6 +134,15 @@ available_setting = {
     "wechatmp_app_id": "",  # 微信公众平台的appID
     "wechatmp_app_secret": "",  # 微信公众平台的appsecret
     "wechatmp_aes_key": "",  # 微信公众平台的EncodingAESKey，加密模式需要
+    # wechatmp图片API处理配置
+    "enable_image_api": False,  # 是否启用图片API处理功能
+    "image_api_url": "",  # 图片处理API的URL地址，例如: http://localhost:8000/api/analyze-answer
+    "image_api_subject": "数学",  # 默认科目
+    "image_api_grade": "初中",  # 默认年级
+    "image_api_require_keyword": True,  # 是否需要先发送触发关键词才能上传图片
+    "image_api_trigger_keywords": ["解析题目", "解题", "分析题目"],  # 触发关键词列表
+    "image_api_prompt": "请上传需要解析的题目图片📷",  # 提示用户上传图片的文本
+    "image_api_state_timeout": 300,  # 等待图片状态的超时时间（秒），默认5分钟
     # wechatcom的通用配置
     "wechatcom_corp_id": "",  # 企业微信公司的corpID
     # wechatcomapp的配置
