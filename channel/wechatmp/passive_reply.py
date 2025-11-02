@@ -319,8 +319,8 @@ def call_remote_image_api(image_path, question_content="帮我解析一下题目
                     if not analysis_text:
                         analysis_text = str(result)
 
-                    # 检查是否启用了 markdown 转图片功能
-                    enable_markdown_image = conf().get("enable_markdown_image", False)
+                    # 检查是否启用了 markdown 转图片功能（默认启用）
+                    enable_markdown_image = conf().get("enable_markdown_image", True)
 
                     if enable_markdown_image and HAS_PIL:
                         logger.info("[wechatmp] Converting analysis result to image...")
