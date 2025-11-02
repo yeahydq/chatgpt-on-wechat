@@ -211,8 +211,11 @@ def markdown_to_image(markdown_text, output_path=None):
         try:
             with sync_playwright() as p:
                 browser = p.chromium.launch(headless=True)
-                # 使用更高的分辨率（不用 device_scale_factor 避免内存问题）
-                page = browser.new_page(viewport={"width": 1600, "height": 900})
+                # 使用高分辨率和设备像素比提高清晰度
+                page = browser.new_page(
+                    viewport={"width": 2000, "height": 1000},
+                    device_scale_factor=1.5  # 1.5倍分辨率
+                )
                 page.set_content(html_with_style)
 
                 # 等待内容加载
@@ -220,7 +223,7 @@ def markdown_to_image(markdown_text, output_path=None):
 
                 # 获取实际内容高度
                 content_height = page.evaluate('document.body.scrollHeight')
-                page.set_viewport_size({"width": 1600, "height": int(content_height)})
+                page.set_viewport_size({"width": 2000, "height": int(content_height)})
 
                 # 截图
                 page.screenshot(path=output_path, full_page=True)
@@ -237,7 +240,7 @@ def markdown_to_image(markdown_text, output_path=None):
         return None
 
 
-def compress_image(image_path, max_size_mb=2, quality=90, max_width=1600, max_height=1600):
+def compress_image(image_path, max_size_mb=3, quality=95, max_width=2000, max_height=2000):
     """
     压缩图片以减小文件大小
     :param image_path: 原始图片路径
@@ -278,7 +281,7 @@ def compress_image(image_path, max_size_mb=2, quality=90, max_width=1600, max_he
         current_quality = quality
         logger.info(f"[wechatmp] Starting compression, target size: {max_size_bytes} bytes, initial quality: {current_quality}%")
 
-        while current_quality > 50:
+        while current_quality > 70:
             buffer = io.BytesIO()
             img.save(buffer, format='JPEG', quality=current_quality, optimize=True)
             compressed_data = buffer.getvalue()
@@ -288,13 +291,13 @@ def compress_image(image_path, max_size_mb=2, quality=90, max_width=1600, max_he
                 logger.info(f"[wechatmp] ✅ Image compressed: {os.path.getsize(image_path)} → {len(compressed_data)} bytes (quality: {current_quality}%)")
                 return compressed_data
 
-            current_quality -= 3
+            current_quality -= 2
 
-        # 如果仍然超过大小，返回质量50的版本
+        # 如果仍然超过大小，返回质量70的版本
         buffer = io.BytesIO()
-        img.save(buffer, format='JPEG', quality=50, optimize=True)
+        img.save(buffer, format='JPEG', quality=70, optimize=True)
         compressed_data = buffer.getvalue()
-        logger.warning(f"[wechatmp] ⚠️ Image compressed to quality 50: {len(compressed_data)} bytes")
+        logger.warning(f"[wechatmp] ⚠️ Image compressed to quality 70: {len(compressed_data)} bytes")
         return compressed_data
 
     except Exception as e:
