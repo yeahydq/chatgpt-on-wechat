@@ -377,6 +377,16 @@ def call_remote_image_api(image_path, question_content="帮我解析一下题目
             'Content-Type': 'application/json',
         }
 
+        # 记录请求详情（用于调试）
+        logger.info(f"[wechatmp] ========== API Request Details ==========")
+        logger.info(f"[wechatmp] URL: {api_url}")
+        logger.info(f"[wechatmp] Method: POST")
+        logger.info(f"[wechatmp] Headers: {headers}")
+        logger.info(f"[wechatmp] Payload keys: {list(payload.keys())}")
+        logger.info(f"[wechatmp] Payload (without image_data): {{'image_data': '<base64 data, length={len(image_data)}>', 'question_content': '{payload.get('question_content')}', 'subject': '{payload.get('subject')}', 'grade': '{payload.get('grade')}'}}")
+        logger.info(f"[wechatmp] Timeout: 120 seconds")
+        logger.info(f"[wechatmp] ==========================================")
+
         # 发送POST请求到远端API
         response = requests.post(
             api_url,
@@ -440,7 +450,15 @@ def call_remote_image_api(image_path, question_content="帮我解析一下题目
             else:
                 return str(result)
         else:
-            logger.error(f"[wechatmp] Image API error: {response.status_code}, {response.text}")
+            logger.error(f"[wechatmp] ========== API Response Error ==========")
+            logger.error(f"[wechatmp] Status Code: {response.status_code}")
+            logger.error(f"[wechatmp] Response Headers: {dict(response.headers)}")
+            logger.error(f"[wechatmp] Response Body: {response.text}")
+            logger.error(f"[wechatmp] Request URL: {api_url}")
+            logger.error(f"[wechatmp] Request Method: POST")
+            logger.error(f"[wechatmp] Request Headers: {headers}")
+            logger.error(f"[wechatmp] Request Payload (without image_data): {{'image_data': '<base64 data, length={len(image_data)}>', 'question_content': '{payload.get('question_content')}', 'subject': '{payload.get('subject')}', 'grade': '{payload.get('grade')}'}}")
+            logger.error(f"[wechatmp] ==========================================")
 
             # 检查是否是请求体过大错误
             if response.status_code == 413:
