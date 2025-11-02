@@ -360,7 +360,7 @@ def call_remote_image_api(image_path, question_content="帮我解析一下题目
                     # 检查是否启用了 markdown 转图片功能（默认启用）
                     enable_markdown_image = conf().get("enable_markdown_image", True)
 
-                    if enable_markdown_image and HAS_PIL:
+                    if enable_markdown_image and HAS_HTML2IMAGE and HAS_MARKDOWN2:
                         logger.info("[wechatmp] Converting analysis result to image...")
                         # 将分析结果转换为图片
                         image_path = markdown_to_image(analysis_text)
@@ -369,7 +369,7 @@ def call_remote_image_api(image_path, question_content="帮我解析一下题目
                             # 返回一个包含文字和图片的结构
                             # 格式：(text_content, image_path)
                             logger.info(f"[wechatmp] Analysis converted to image: {image_path}")
-                            return (analysis_text[:200] + "...\n\n[详细分析已转换为图片]", image_path)
+                            return (analysis_text, image_path)
                         else:
                             logger.warning("[wechatmp] Failed to convert to image, returning text only")
                             return analysis_text
@@ -468,7 +468,7 @@ class Query:
                                 "original_message": content
                             }
                             # 提示用户上传图片，直接返回
-                            prompt_text = conf().get("image_api_prompt", "请上传需要解析的题目图片📷")
+                            prompt_text = conf().get("image_api_prompt", "请上传需要解析的题目图片， 由于识别耗时，请多次查询结果")
                             logger.info(f"[wechatmp] Set user {from_user} to waiting_image state, sending prompt")
                             replyPost = create_reply(prompt_text, msg)
                             return encrypt_func(replyPost.render())
@@ -515,10 +515,15 @@ class Query:
                                     grade = conf().get("image_api_grade", "初中")
                                     api_result = call_remote_image_api(image_path, subject=subject, grade=grade)
 
-                                    # 将结果缓存，准备返回给用户
+                                    channel.running.remove(from_user)
+
+                                    # 清除用户状态
+                                    channel.user_session_state.pop(from_user, None)
+
+                                    # 缓存结果，等待用户查询
                                     # api_result 可能是字符串或 (text, image_path) 元组
                                     if isinstance(api_result, tuple) and len(api_result) == 2:
-                                        # 返回图片 + 文字提示
+                                        # 返回图片 + 文字
                                         text_content, image_path = api_result
                                         # 缓存图片路径和完整的文字内容
                                         channel.cache_dict[from_user].append(("image", image_path))
@@ -529,13 +534,10 @@ class Query:
                                         channel.cache_dict[from_user].append(("text", api_result))
                                         logger.info(f"[wechatmp] Cached text result for {from_user}")
 
-                                    channel.running.remove(from_user)
-
-                                    # 清除用户状态
-                                    channel.user_session_state.pop(from_user, None)
-
-                                    # 不再走正常的消息处理流程
-                                    logger.info(f"[wechatmp] Image API result cached for {from_user}")
+                                    # 返回"正在分析中"提示
+                                    reply_text = "✅ 已收到图片，正在分析中...请稍候"
+                                    replyPost = create_reply(reply_text, msg)
+                                    return encrypt_func(replyPost.render())
                             else:
                                 # 用户没有先发送触发词，提示用户，直接返回
                                 logger.info(f"[wechatmp] User {from_user} sent image without trigger keyword")
@@ -567,10 +569,15 @@ class Query:
                             grade = conf().get("image_api_grade", "初中")
                             api_result = call_remote_image_api(image_path, subject=subject, grade=grade)
 
-                            # 将结果缓存，准备返回给用户
+                            channel.running.remove(from_user)
+
+                            # 清除用户状态（如果有的话）
+                            channel.user_session_state.pop(from_user, None)
+
+                            # 缓存结果，等待用户查询
                             # api_result 可能是字符串或 (text, image_path) 元组
                             if isinstance(api_result, tuple) and len(api_result) == 2:
-                                # 返回图片 + 文字提示
+                                # 返回图片 + 文字
                                 text_content, image_path = api_result
                                 # 缓存图片路径和完整的文字内容
                                 channel.cache_dict[from_user].append(("image", image_path))
@@ -581,13 +588,10 @@ class Query:
                                 channel.cache_dict[from_user].append(("text", api_result))
                                 logger.info(f"[wechatmp] Cached text result for {from_user}")
 
-                            channel.running.remove(from_user)
-
-                            # 清除用户状态（如果有的话）
-                            channel.user_session_state.pop(from_user, None)
-
-                            # 不再走正常的消息处理流程
-                            logger.info(f"[wechatmp] Image API result cached for {from_user}")
+                            # 返回"正在分析中"提示
+                            reply_text = "✅ 已收到图片，正在分析中...请稍候"
+                            replyPost = create_reply(reply_text, msg)
+                            return encrypt_func(replyPost.render())
 
                     # 如果上面的特殊处理都没有执行，走正常流程
                     if channel.cache_dict.get(from_user) is None and from_user not in channel.running:
