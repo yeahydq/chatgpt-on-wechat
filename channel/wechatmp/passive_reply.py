@@ -36,6 +36,9 @@ def call_remote_image_api(image_path, question_content="", subject="数学", gra
             return "图片处理API未配置，请在config.json中设置image_api_url"
 
         logger.info(f"[wechatmp] Calling remote image API: {api_url} with image: {image_path}")
+        logger.info(f"[wechatmp] Image path type: {type(image_path)}")
+        logger.info(f"[wechatmp] Image file exists: {os.path.exists(image_path)}")
+        logger.info(f"[wechatmp] Image file size: {os.path.getsize(image_path) if os.path.exists(image_path) else 'N/A'} bytes")
 
         # 读取图片文件并转换为base64
         with open(image_path, 'rb') as f:
@@ -192,7 +195,15 @@ class Query:
                                     channel.running.add(from_user)
 
                                     # 下载图片到本地
+                                    logger.info(f"[wechatmp] Before prepare() - content type: {type(content)}, content: {content}")
+                                    logger.info(f"[wechatmp] Before prepare() - ctype: {wechatmp_msg.ctype}")
+
                                     wechatmp_msg.prepare()
+
+                                    logger.info(f"[wechatmp] After prepare() - content type: {type(content)}, content: {content}")
+                                    logger.info(f"[wechatmp] After prepare() - wechatmp_msg.content: {wechatmp_msg.content}")
+                                    logger.info(f"[wechatmp] Image file exists: {os.path.exists(content)}")
+
                                     image_path = content  # content是图片的本地路径
 
                                     # 调用远端API处理图片
@@ -222,7 +233,15 @@ class Query:
                             channel.running.add(from_user)
 
                             # 下载图片到本地
+                            logger.info(f"[wechatmp] Before prepare() - content type: {type(content)}, content: {content}")
+                            logger.info(f"[wechatmp] Before prepare() - ctype: {wechatmp_msg.ctype}")
+
                             wechatmp_msg.prepare()
+
+                            logger.info(f"[wechatmp] After prepare() - content type: {type(content)}, content: {content}")
+                            logger.info(f"[wechatmp] After prepare() - wechatmp_msg.content: {wechatmp_msg.content}")
+                            logger.info(f"[wechatmp] Image file exists: {os.path.exists(content)}")
+
                             image_path = content  # content是图片的本地路径
 
                             # 调用远端API处理图片
