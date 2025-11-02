@@ -122,6 +122,11 @@ def markdown_to_image(markdown_text, output_path=None, max_width=800, line_heigh
         # 分行处理
         lines = text.split('\n')
 
+        # 调试：输出前几行文本
+        logger.info(f"[wechatmp] Total lines: {len(lines)}")
+        for i, line in enumerate(lines[:5]):
+            logger.info(f"[wechatmp] Line {i}: {repr(line)}")
+
         # 计算图片高度
         padding = 20
         img_height = len(lines) * line_height + padding * 2
@@ -132,31 +137,64 @@ def markdown_to_image(markdown_text, output_path=None, max_width=800, line_heigh
         draw = ImageDraw.Draw(img)
 
         # 尝试加载字体（如果失败则使用默认字体）
-        try:
-            # 尝试使用系统字体
-            font = ImageFont.truetype("/System/Library/Fonts/PingFang.ttc", font_size)
-        except:
+        font = None
+        font_paths = [
+            # macOS 通用字体
+            "/System/Library/Fonts/Helvetica.ttc",
+            "/System/Library/Fonts/Arial.ttf",
+            "/Library/Fonts/Arial.ttf",
+            # Linux 通用字体
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+            "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+            # Windows 通用字体
+            "C:\\Windows\\Fonts\\arial.ttf",
+            "C:\\Windows\\Fonts\\segoeui.ttf",
+        ]
+
+        for font_path in font_paths:
             try:
-                # macOS 备选字体
-                font = ImageFont.truetype("/Library/Fonts/Arial.ttf", font_size)
+                if os.path.exists(font_path):
+                    font = ImageFont.truetype(font_path, font_size)
+                    logger.info(f"[wechatmp] Loaded font from: {font_path}")
+                    break
+            except Exception as e:
+                logger.debug(f"[wechatmp] Failed to load font from {font_path}: {e}")
+                continue
+
+        if font is None:
+            # 使用默认字体
+            logger.warning("[wechatmp] No suitable font found, using default font")
+            try:
+                # 尝试使用 PIL 的默认字体（支持更多字符）
+                font = ImageFont.load_default(size=font_size)
             except:
-                # 使用默认字体
+                # 旧版本 PIL 的默认字体
                 font = ImageFont.load_default()
 
         # 绘制文本
         y = padding
-        for line in lines:
+        drawn_lines = 0
+        for line_idx, line in enumerate(lines):
             # 清理行尾空格和特殊字符
             line = line.rstrip()
 
             if line.strip():  # 只绘制非空行
                 try:
+                    # 确保文本是字符串类型
+                    if not isinstance(line, str):
+                        line = str(line)
+
                     draw.text((padding, y), line, fill='black', font=font)
+                    drawn_lines += 1
+                    logger.debug(f"[wechatmp] Drew line {line_idx}: {repr(line[:50])}")
                 except Exception as e:
-                    logger.warning(f"[wechatmp] Failed to draw text: {e}, skipping line")
+                    logger.warning(f"[wechatmp] Failed to draw line {line_idx}: {e}, text: {repr(line[:50])}")
                 y += line_height
             else:
                 y += line_height // 2  # 空行占用一半高度
+
+        logger.info(f"[wechatmp] Successfully drew {drawn_lines} lines")
 
         # 调整图片高度以适应实际内容
         img = img.crop((0, 0, img_width, y + padding))
@@ -319,6 +357,13 @@ def call_remote_image_api(image_path, question_content="帮我解析一下题目
                     if not analysis_text:
                         analysis_text = str(result)
 
+                    # 确保文本是字符串类型
+                    if not isinstance(analysis_text, str):
+                        analysis_text = str(analysis_text)
+
+                    logger.info(f"[wechatmp] Analysis text type: {type(analysis_text)}, length: {len(analysis_text)}")
+                    logger.info(f"[wechatmp] Analysis text preview: {repr(analysis_text[:100])}")
+
                     # 检查是否启用了 markdown 转图片功能（默认启用）
                     enable_markdown_image = conf().get("enable_markdown_image", True)
 
@@ -480,11 +525,12 @@ class Query:
                                     # 将结果缓存，准备返回给用户
                                     # api_result 可能是字符串或 (text, image_path) 元组
                                     if isinstance(api_result, tuple) and len(api_result) == 2:
-                                        # 返回文字 + 图片
+                                        # 返回图片 + 文字提示
                                         text_content, image_path = api_result
-                                        channel.cache_dict[from_user].append(("text", text_content))
+                                        # 缓存图片路径和完整的文字内容
                                         channel.cache_dict[from_user].append(("image", image_path))
-                                        logger.info(f"[wechatmp] Cached text + image result for {from_user}")
+                                        channel.cache_dict[from_user].append(("text", text_content))
+                                        logger.info(f"[wechatmp] Cached image + text result for {from_user}")
                                     else:
                                         # 只返回文字
                                         channel.cache_dict[from_user].append(("text", api_result))
@@ -531,11 +577,12 @@ class Query:
                             # 将结果缓存，准备返回给用户
                             # api_result 可能是字符串或 (text, image_path) 元组
                             if isinstance(api_result, tuple) and len(api_result) == 2:
-                                # 返回文字 + 图片
+                                # 返回图片 + 文字提示
                                 text_content, image_path = api_result
-                                channel.cache_dict[from_user].append(("text", text_content))
+                                # 缓存图片路径和完整的文字内容
                                 channel.cache_dict[from_user].append(("image", image_path))
-                                logger.info(f"[wechatmp] Cached text + image result for {from_user}")
+                                channel.cache_dict[from_user].append(("text", text_content))
+                                logger.info(f"[wechatmp] Cached image + text result for {from_user}")
                             else:
                                 # 只返回文字
                                 channel.cache_dict[from_user].append(("text", api_result))
@@ -679,49 +726,55 @@ class Query:
                     return encrypt_func(replyPost.render())
 
                 elif reply_type == "image":
-                    # reply_content 可能是 media_id 或本地文件路径
+                    # reply_content 可能是 (media_id, hint_text) 元组或本地文件路径
                     media_id = None
                     local_image_path = None
+                    hint_text = "💡 需要文字版本？请回复：文字"
 
-                    logger.info(f"[wechatmp] Processing image reply, reply_content: {reply_content}, exists: {os.path.exists(reply_content)}")
-
-                    if os.path.exists(reply_content):
-                        # 本地文件路径，需要上传到微信服务器
-                        logger.info(f"[wechatmp] Uploading local image to WeChat: {reply_content}")
-                        local_image_path = reply_content  # 保存本地路径，稍后删除
-                        try:
-                            # 检查文件大小
-                            file_size = os.path.getsize(reply_content)
-                            logger.info(f"[wechatmp] Image file size: {file_size} bytes")
-
-                            with open(reply_content, 'rb') as f:
-                                image_type = imghdr.what(reply_content)
-                                logger.info(f"[wechatmp] Image type: {image_type}")
-                                filename = f"image-{message_id}.{image_type}"
-                                content_type = f"image/{image_type}"
-                                logger.info(f"[wechatmp] Uploading with filename: {filename}, content_type: {content_type}")
-                                response = channel.client.material.add("image", (filename, f, content_type))
-                                logger.info(f"[wechatmp] upload image response: {response}")
-                                media_id = response.get("media_id")
-                                logger.info(f"[wechatmp] image uploaded, receiver {from_user}, media_id {media_id}")
-                        except Exception as e:
-                            logger.error(f"[wechatmp] Failed to upload image: {e}")
-                            import traceback
-                            logger.error(f"[wechatmp] Traceback: {traceback.format_exc()}")
-                            # 上传失败，返回错误信息
-                            reply_text = "图片上传失败，请稍后重试"
-                            replyPost = create_reply(reply_text, msg)
-                            return encrypt_func(replyPost.render())
+                    # 检查是否是元组（包含 media_id 和提示文字）
+                    if isinstance(reply_content, tuple) and len(reply_content) == 2:
+                        media_id, hint_text = reply_content
+                        logger.info(f"[wechatmp] Processing image reply with hint, media_id: {media_id}, hint: {hint_text}")
                     else:
-                        # media_id
-                        logger.info(f"[wechatmp] Using media_id directly: {reply_content}")
-                        media_id = reply_content
-                        asyncio.run_coroutine_threadsafe(channel.delete_media(media_id), channel.delete_media_loop)
+                        logger.info(f"[wechatmp] Processing image reply, reply_content: {reply_content}, exists: {os.path.exists(reply_content)}")
 
-                    # 发送图片
+                        if os.path.exists(reply_content):
+                            # 本地文件路径，需要上传到微信服务器
+                            logger.info(f"[wechatmp] Uploading local image to WeChat: {reply_content}")
+                            local_image_path = reply_content  # 保存本地路径，稍后删除
+                            try:
+                                # 检查文件大小
+                                file_size = os.path.getsize(reply_content)
+                                logger.info(f"[wechatmp] Image file size: {file_size} bytes")
+
+                                with open(reply_content, 'rb') as f:
+                                    image_type = imghdr.what(reply_content)
+                                    logger.info(f"[wechatmp] Image type: {image_type}")
+                                    filename = f"image-{message_id}.{image_type}"
+                                    content_type = f"image/{image_type}"
+                                    logger.info(f"[wechatmp] Uploading with filename: {filename}, content_type: {content_type}")
+                                    response = channel.client.material.add("image", (filename, f, content_type))
+                                    logger.info(f"[wechatmp] upload image response: {response}")
+                                    media_id = response.get("media_id")
+                                    logger.info(f"[wechatmp] image uploaded, receiver {from_user}, media_id {media_id}")
+                            except Exception as e:
+                                logger.error(f"[wechatmp] Failed to upload image: {e}")
+                                import traceback
+                                logger.error(f"[wechatmp] Traceback: {traceback.format_exc()}")
+                                # 上传失败，返回错误信息
+                                reply_text = "图片上传失败，请稍后重试"
+                                replyPost = create_reply(reply_text, msg)
+                                return encrypt_func(replyPost.render())
+                        else:
+                            # media_id
+                            logger.info(f"[wechatmp] Using media_id directly: {reply_content}")
+                            media_id = reply_content
+                            asyncio.run_coroutine_threadsafe(channel.delete_media(media_id), channel.delete_media_loop)
+
+                    # 发送图片 + 文字提示
                     if media_id:
                         logger.info(
-                            "[wechatmp] Request {} do send to {} {}: {} image media_id {}".format(
+                            "[wechatmp] Request {} do send to {} {}: {} image media_id {} with hint".format(
                                 request_cnt,
                                 from_user,
                                 message_id,
@@ -729,9 +782,19 @@ class Query:
                                 media_id,
                             )
                         )
-                        replyPost = ImageReply(message=msg)
-                        replyPost.media_id = media_id
-                        result = encrypt_func(replyPost.render())
+
+                        # 构建包含图片和文字的 XML 响应
+                        xml_response = f"""<xml>
+<ToUserName><![CDATA[{msg.source}]]></ToUserName>
+<FromUserName><![CDATA[{msg.target}]]></FromUserName>
+<CreateTime>{int(time.time())}</CreateTime>
+<MsgType><![CDATA[image]]></MsgType>
+<Image>
+<MediaId><![CDATA[{media_id}]]></MediaId>
+</Image>
+</xml>"""
+
+                        result = encrypt_func(xml_response)
 
                         # 发送成功后，删除本地临时文件
                         if local_image_path and os.path.exists(local_image_path):
@@ -740,6 +803,12 @@ class Query:
                                 logger.info(f"[wechatmp] Deleted temporary image after sending: {local_image_path}")
                             except Exception as e:
                                 logger.warning(f"[wechatmp] Failed to delete temporary image: {e}")
+
+                        # 缓存提示文字，用户下次发送消息时会收到
+                        if from_user not in channel.cache_dict:
+                            channel.cache_dict[from_user] = []
+                        channel.cache_dict[from_user].append(("text", hint_text))
+                        logger.info(f"[wechatmp] Cached hint text for {from_user}: {hint_text}")
 
                         return result
                     else:
