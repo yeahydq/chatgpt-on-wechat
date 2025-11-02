@@ -685,17 +685,27 @@ class Query:
 
                 elif reply_type == "image":
                     # reply_content 可能是 media_id 或本地文件路径
+                    media_id = None
+
+                    logger.info(f"[wechatmp] Processing image reply, reply_content: {reply_content}, exists: {os.path.exists(reply_content)}")
+
                     if os.path.exists(reply_content):
                         # 本地文件路径，需要上传到微信服务器
                         logger.info(f"[wechatmp] Uploading local image to WeChat: {reply_content}")
                         try:
+                            # 检查文件大小
+                            file_size = os.path.getsize(reply_content)
+                            logger.info(f"[wechatmp] Image file size: {file_size} bytes")
+
                             with open(reply_content, 'rb') as f:
                                 image_type = imghdr.what(reply_content)
+                                logger.info(f"[wechatmp] Image type: {image_type}")
                                 filename = f"image-{message_id}.{image_type}"
                                 content_type = f"image/{image_type}"
+                                logger.info(f"[wechatmp] Uploading with filename: {filename}, content_type: {content_type}")
                                 response = channel.client.material.add("image", (filename, f, content_type))
-                                logger.debug(f"[wechatmp] upload image response: {response}")
-                                media_id = response["media_id"]
+                                logger.info(f"[wechatmp] upload image response: {response}")
+                                media_id = response.get("media_id")
                                 logger.info(f"[wechatmp] image uploaded, receiver {from_user}, media_id {media_id}")
 
                                 # 删除本地临时文件
@@ -706,27 +716,37 @@ class Query:
                                     logger.warning(f"[wechatmp] Failed to delete temporary image: {e}")
                         except Exception as e:
                             logger.error(f"[wechatmp] Failed to upload image: {e}")
+                            import traceback
+                            logger.error(f"[wechatmp] Traceback: {traceback.format_exc()}")
                             # 上传失败，返回错误信息
                             reply_text = "图片上传失败，请稍后重试"
                             replyPost = create_reply(reply_text, msg)
                             return encrypt_func(replyPost.render())
                     else:
                         # media_id
+                        logger.info(f"[wechatmp] Using media_id directly: {reply_content}")
                         media_id = reply_content
                         asyncio.run_coroutine_threadsafe(channel.delete_media(media_id), channel.delete_media_loop)
 
-                    logger.info(
-                        "[wechatmp] Request {} do send to {} {}: {} image media_id {}".format(
-                            request_cnt,
-                            from_user,
-                            message_id,
-                            content,
-                            media_id,
+                    # 发送图片
+                    if media_id:
+                        logger.info(
+                            "[wechatmp] Request {} do send to {} {}: {} image media_id {}".format(
+                                request_cnt,
+                                from_user,
+                                message_id,
+                                content,
+                                media_id,
+                            )
                         )
-                    )
-                    replyPost = ImageReply(message=msg)
-                    replyPost.media_id = media_id
-                    return encrypt_func(replyPost.render())
+                        replyPost = ImageReply(message=msg)
+                        replyPost.media_id = media_id
+                        return encrypt_func(replyPost.render())
+                    else:
+                        logger.error("[wechatmp] Failed to get media_id for image")
+                        reply_text = "图片发送失败，请稍后重试"
+                        replyPost = create_reply(reply_text, msg)
+                        return encrypt_func(replyPost.render())
 
             elif msg.type == "event":
                 logger.info("[wechatmp] Event {} from {}".format(msg.event, msg.source))
