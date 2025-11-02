@@ -26,10 +26,10 @@ except ImportError:
     HAS_MARKDOWN2 = False
 
 try:
-    import imgkit
-    HAS_IMGKIT = True
+    from playwright.sync_api import sync_playwright
+    HAS_PLAYWRIGHT = True
 except ImportError:
-    HAS_IMGKIT = False
+    HAS_PLAYWRIGHT = False
 
 try:
     from PIL import Image, ImageDraw, ImageFont
@@ -95,17 +95,17 @@ def extract_and_replace_formulas(text):
 
 def markdown_to_image(markdown_text, output_path=None):
     """
-    将 Markdown 文本转换为图片（使用 markdown2 + imgkit）
+    将 Markdown 文本转换为图片（使用 markdown2 + playwright）
     :param markdown_text: Markdown 文本内容
     :param output_path: 输出图片路径（如果为None，则保存到临时目录）
     :return: 图片路径
     """
-    if not HAS_MARKDOWN2 or not HAS_IMGKIT:
-        logger.warning(f"[wechatmp] markdown2={HAS_MARKDOWN2} or imgkit={HAS_IMGKIT} not installed, cannot convert markdown to image")
+    if not HAS_MARKDOWN2 or not HAS_PLAYWRIGHT:
+        logger.warning(f"[wechatmp] markdown2={HAS_MARKDOWN2} or playwright={HAS_PLAYWRIGHT} not installed, cannot convert markdown to image")
         return None
 
     try:
-        logger.info(f"[wechatmp] Converting markdown to image using markdown2 + imgkit, text length: {len(markdown_text)}")
+        logger.info(f"[wechatmp] Converting markdown to image using markdown2 + playwright, text length: {len(markdown_text)}")
 
         # 规范化换行符
         text = markdown_text
@@ -196,37 +196,31 @@ def markdown_to_image(markdown_text, output_path=None):
 
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
-        # 使用 imgkit 将 HTML 转换为图片
-        logger.info(f"[wechatmp] Converting HTML to image: {output_path}")
-
-        # imgkit 配置选项
-        options = {
-            'format': 'png',
-            'width': 1200,
-            'enable-local-file-access': None,
-        }
+        # 使用 playwright 将 HTML 转换为图片
+        logger.info(f"[wechatmp] Converting HTML to image using playwright: {output_path}")
 
         try:
-            imgkit.from_string(html_with_style, output_path, options=options)
-            logger.info(f"[wechatmp] Markdown converted to image: {output_path}")
-            return output_path
-        except Exception as e:
-            logger.error(f"[wechatmp] imgkit conversion failed: {e}")
-            logger.info("[wechatmp] Trying alternative method...")
-            # 如果 imgkit 失败，尝试保存为 HTML 文件然后转换
-            html_path = output_path.replace('.png', '.html')
-            with open(html_path, 'w', encoding='utf-8') as f:
-                f.write(html_with_style)
-            try:
-                imgkit.from_file(html_path, output_path, options=options)
-                os.remove(html_path)
-                logger.info(f"[wechatmp] Markdown converted to image (from file): {output_path}")
+            with sync_playwright() as p:
+                browser = p.chromium.launch(headless=True)
+                page = browser.new_page(viewport={"width": 1200, "height": 800})
+                page.set_content(html_with_style)
+
+                # 等待内容加载
+                page.wait_for_load_state('networkidle')
+
+                # 获取实际内容高度
+                content_height = page.evaluate('document.body.scrollHeight')
+                page.set_viewport_size({"width": 1200, "height": int(content_height)})
+
+                # 截图
+                page.screenshot(path=output_path, full_page=True)
+                browser.close()
+
+                logger.info(f"[wechatmp] Markdown converted to image: {output_path}")
                 return output_path
-            except Exception as e2:
-                logger.error(f"[wechatmp] Alternative method also failed: {e2}")
-                if os.path.exists(html_path):
-                    os.remove(html_path)
-                return None
+        except Exception as e:
+            logger.error(f"[wechatmp] Playwright conversion failed: {e}")
+            return None
 
     except Exception as e:
         logger.exception(f"[wechatmp] Error converting markdown to image: {e}")
@@ -384,9 +378,9 @@ def call_remote_image_api(image_path, question_content="帮我解析一下题目
                     # 检查是否启用了 markdown 转图片功能（默认启用）
                     enable_markdown_image = conf().get("enable_markdown_image", True)
 
-                    logger.info(f"[wechatmp] Image conversion check: enable_markdown_image={enable_markdown_image}, HAS_MARKDOWN2={HAS_MARKDOWN2}, HAS_IMGKIT={HAS_IMGKIT}")
+                    logger.info(f"[wechatmp] Image conversion check: enable_markdown_image={enable_markdown_image}, HAS_MARKDOWN2={HAS_MARKDOWN2}, HAS_PLAYWRIGHT={HAS_PLAYWRIGHT}")
 
-                    if enable_markdown_image and HAS_MARKDOWN2 and HAS_IMGKIT:
+                    if enable_markdown_image and HAS_MARKDOWN2 and HAS_PLAYWRIGHT:
                         logger.info("[wechatmp] Converting analysis result to image...")
                         # 将分析结果转换为图片
                         image_path = markdown_to_image(analysis_text)
@@ -400,7 +394,7 @@ def call_remote_image_api(image_path, question_content="帮我解析一下题目
                             logger.warning("[wechatmp] Failed to convert to image, returning text only")
                             return analysis_text
                     else:
-                        logger.warning(f"[wechatmp] Skipping image conversion: enable={enable_markdown_image}, markdown2={HAS_MARKDOWN2}, imgkit={HAS_IMGKIT}")
+                        logger.warning(f"[wechatmp] Skipping image conversion: enable={enable_markdown_image}, markdown2={HAS_MARKDOWN2}, playwright={HAS_PLAYWRIGHT}")
                         return analysis_text
                 else:
                     error_msg = result.get('error', result.get('message', '未知错误'))

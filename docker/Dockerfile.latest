@@ -12,13 +12,16 @@ ENV BUILD_PREFIX=/app
 ADD . ${BUILD_PREFIX}
 
 RUN apt-get update \
-    &&apt-get install -y --no-install-recommends bash ffmpeg espeak libavcodec-extra\
+    && apt-get install -y --no-install-recommends bash ffmpeg espeak libavcodec-extra \
     && cd ${BUILD_PREFIX} \
     && cp config-template.json config.json \
     && /usr/local/bin/python -m pip install --no-cache --upgrade pip \
     && pip install --no-cache -r requirements.txt \
     && pip install --no-cache -r requirements-optional.txt \
-    && pip install azure-cognitiveservices-speech
+    && pip install azure-cognitiveservices-speech \
+    && python -m playwright install chromium \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR ${BUILD_PREFIX}
 
