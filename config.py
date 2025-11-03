@@ -136,7 +136,7 @@ available_setting = {
     "wechatmp_aes_key": "",  # 微信公众平台的EncodingAESKey，加密模式需要
     # wechatmp图片API处理配置
     "enable_image_api": False,  # 是否启用图片API处理功能
-    "image_api_url": "",  # 图片处理API的URL地址，例如: http://localhost:8000/api/analyze-answer
+    "image_api_url": "",  # 图片处理API的base URL地址，例如: http://8.134.197.188/mindmap-api，后续会组装多种URL如 /api/analyze-answer, /api/html-report/{id} 等
     "image_api_subject": "数学",  # 默认科目
     "image_api_grade": "初中",  # 默认年级
     "image_api_require_keyword": True,  # 是否需要先发送触发关键词才能上传图片
