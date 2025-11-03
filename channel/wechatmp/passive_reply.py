@@ -330,51 +330,42 @@ def process_image_api_async(channel, from_user, image_path, subject="数学", gr
             image_path_result = api_result[1]
             html_report_url = api_result[2] if len(api_result) > 2 else None
 
-            # 上传图片到微信服务器并获取 media_id
-            try:
-                if os.path.exists(image_path_result):
-                    logger.info(f"[wechatmp] Uploading markdown image to WeChat: {image_path_result}")
-                    with open(image_path_result, 'rb') as f:
-                        image_type = imghdr.what(image_path_result)
-                        filename = f"markdown-{int(time.time())}.{image_type}"
-                        content_type = f"image/{image_type}"
-                        response = channel.client.material.add("image", (filename, f, content_type))
-                        media_id = response.get("media_id")
-                        logger.info(f"[wechatmp] Markdown image uploaded, media_id: {media_id}")
+            # 如果有HTML报告URL，直接返回URL，不需要图片和文字
+            if html_report_url:
+                channel.cache_dict[from_user].append(("text", html_report_url))
+                logger.info(f"[wechatmp] Async: Cached HTML report URL for {from_user}: {html_report_url}")
+            else:
+                # 没有HTML报告URL，按原逻辑上传图片和文字
+                # 上传图片到微信服务器并获取 media_id
+                try:
+                    if image_path_result and os.path.exists(image_path_result):
+                        logger.info(f"[wechatmp] Uploading markdown image to WeChat: {image_path_result}")
+                        with open(image_path_result, 'rb') as f:
+                            image_type = imghdr.what(image_path_result)
+                            filename = f"markdown-{int(time.time())}.{image_type}"
+                            content_type = f"image/{image_type}"
+                            response = channel.client.material.add("image", (filename, f, content_type))
+                            media_id = response.get("media_id")
+                            logger.info(f"[wechatmp] Markdown image uploaded, media_id: {media_id}")
 
-                    # 删除本地临时文件
-                    try:
-                        os.remove(image_path_result)
-                        logger.info(f"[wechatmp] Deleted temporary markdown image: {image_path_result}")
-                    except Exception as e:
-                        logger.warning(f"[wechatmp] Failed to delete temporary markdown image: {e}")
+                        # 删除本地临时文件
+                        try:
+                            os.remove(image_path_result)
+                            logger.info(f"[wechatmp] Deleted temporary markdown image: {image_path_result}")
+                        except Exception as e:
+                            logger.warning(f"[wechatmp] Failed to delete temporary markdown image: {e}")
 
-                    # 缓存 media_id 和文字
-                    channel.cache_dict[from_user].append(("image", media_id))
-
-                    # 如果有HTML报告URL，将其与文字组合后缓存
-                    if html_report_url:
-                        combined_text = f"{text_content}\n\n📊 详细报告：{html_report_url}"
-                        channel.cache_dict[from_user].append(("text", combined_text))
-                        logger.info(f"[wechatmp] Async: Cached image (media_id) + text + HTML URL for {from_user}")
-                    else:
+                        # 缓存 media_id 和文字
+                        channel.cache_dict[from_user].append(("image", media_id))
                         channel.cache_dict[from_user].append(("text", text_content))
                         logger.info(f"[wechatmp] Async: Cached image (media_id) + text result for {from_user}")
-                else:
-                    logger.warning(f"[wechatmp] Markdown image file not found: {image_path_result}")
-                    if html_report_url:
-                        combined_text = f"{text_content}\n\n📊 详细报告：{html_report_url}"
-                        channel.cache_dict[from_user].append(("text", combined_text))
                     else:
+                        logger.warning(f"[wechatmp] Markdown image file not found or is None: {image_path_result}")
                         channel.cache_dict[from_user].append(("text", text_content))
-            except Exception as e:
-                logger.error(f"[wechatmp] Failed to upload markdown image: {e}")
-                import traceback
-                logger.error(f"[wechatmp] Traceback: {traceback.format_exc()}")
-                if html_report_url:
-                    combined_text = f"{text_content}\n\n📊 详细报告：{html_report_url}"
-                    channel.cache_dict[from_user].append(("text", combined_text))
-                else:
+                except Exception as e:
+                    logger.error(f"[wechatmp] Failed to upload markdown image: {e}")
+                    import traceback
+                    logger.error(f"[wechatmp] Traceback: {traceback.format_exc()}")
                     channel.cache_dict[from_user].append(("text", text_content))
         else:
             # 只返回文字
@@ -484,12 +475,14 @@ def call_remote_image_api(image_path, question_content="帮我解析一下题目
                     logger.info(f"[wechatmp] Analysis text type: {type(analysis_text)}, length: {len(analysis_text)}")
                     logger.info(f"[wechatmp] Analysis text preview: {repr(analysis_text[:100])}")
 
-                    # 如果返回了 html_api_path，拼凑完整URL并附加到返回值
+                    # 如果返回了 html_api_path，拼凑完整URL
                     html_report_url = None
                     if html_api_path:
                         base_url = conf().get("image_api_url", "").rstrip('/')
                         html_report_url = f"{base_url}{html_api_path}"
                         logger.info(f"[wechatmp] HTML report URL generated: {html_report_url}")
+                        # 直接返回URL，不需要转换为图片
+                        return (analysis_text, None, html_report_url)
 
                     # 检查是否启用了 markdown 转图片功能（默认启用）
                     enable_markdown_image = conf().get("enable_markdown_image", True)
@@ -505,7 +498,7 @@ def call_remote_image_api(image_path, question_content="帮我解析一下题目
                             # 返回一个包含文字和图片的结构
                             # 格式：(text_content, image_path, html_report_url)
                             logger.info(f"[wechatmp] Analysis converted to image: {image_path}")
-                            return (analysis_text, image_path, html_report_url)
+                            return (analysis_text, image_path, None)
                         else:
                             logger.warning("[wechatmp] Failed to convert to image, returning text only")
                             return analysis_text
